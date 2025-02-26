@@ -1,0 +1,471 @@
+# All code is to be executed in Jupyter notebooks, where the break in cells is indicated in the comments before each cell block
+
+# Objective:
+# To model European option pricing using the Black–Scholes framework, extract real-world data via yfinance, calibrate the model by computing 
+# implied volatilities, and visualize the volatility smile.
+
+# Cell 1: Black-Scholes Option Pricing and Implied Volatility Functions
+
+# Definitions for the Black–Scholes functions (for call and put pricing) and a function to compute implied volatility
+
+import numpy as np
+from scipy.stats import norm
+from scipy.optimize import brentq
+
+def black_scholes_call(S, K, T, r, sigma):
+    """
+    Calculate the Black–Scholes price for a European call option.
+    
+    Parameters:
+        S (float): Current stock price.
+        K (float): Strike price.
+        T (float): Time to maturity (in years).
+        r (float): Risk-free interest rate (annualized).
+        sigma (float): Volatility of the underlying asset (annualized).
+    
+    Returns:
+        float: The call option price.
+    """
+    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    call_price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+    return call_price
+
+def black_scholes_put(S, K, T, r, sigma):
+    """
+    Calculate the Black–Scholes price for a European put option.
+    
+    Parameters:
+        S (float): Current stock price.
+        K (float): Strike price.
+        T (float): Time to maturity (in years).
+        r (float): Risk-free interest rate (annualized).
+        sigma (float): Volatility of the underlying asset (annualized).
+    
+    Returns:
+        float: The put option price.
+    """
+    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    put_price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+    return put_price
+    
+
+def implied_volatility_call(market_price, S, K, T, r, sigma_low=1e-5, sigma_high=5.0):
+    """
+    Calculate the implied volatility for a European call option given its market price.
+    
+    This function uses Brent's method (define in powerpoint) to solve for sigma such that the Black–Scholes 
+    call price equals the observed market price.
+    
+    Parameters:
+        market_price (float): Observed market price of the call option.
+        S (float): Current stock price.
+        K (float): Strike price.
+        T (float): Time to maturity (in years).
+        r (float): Risk-free interest rate (annualized).
+        sigma_low (float): Lower bound for volatility search.
+        sigma_high (float): Upper bound for volatility search.
+    
+    Returns:
+        float: Implied volatility, or NaN if not found.
+    """
+    
+    # Define the objective function: difference between theoretical and market price
+    f = lambda sigma: black_scholes_call(S, K, T, r, sigma) - market_price
+    try:
+        implied_vol = brentq(f, sigma_low, sigma_high)
+    except ValueError:
+        implied_vol = np.nan
+    return implied_vol
+
+# Example usage of the pricing functions:
+if __name__ == "__main__":
+    
+    # Example (arbitrary) parameters for testing
+    S = 100      # Current stock price
+    K = 100      # Strike price
+    T = 1.0      # Time to maturity in years
+    r = 0.05     # Risk-free interest rate (5%)
+    sigma = 0.2  # Volatility (20%)
+    
+    # Calculate call and put prices
+    call_price = black_scholes_call(S, K, T, r, sigma)
+    put_price = black_scholes_put(S, K, T, r, sigma)
+    
+    print("Example Call Price: {:.2f}".format(call_price))
+    print("Example Put Price: {:.2f}".format(put_price))
+
+#################################################################################################################
+
+# Cell 2: Downloading Stock and Options Data via yfinance
+
+# Install yfinance if not already installed (uncomment the line below if needed)
+!pip install yfinance --quiet
+
+import yfinance as yf
+
+# Define the ticker symbol (e.g., AAPL for Apple Inc.)
+ticker = "AAPL"
+data = yf.Ticker(ticker)
+
+# Retrieve the current stock price using historical data
+current_price = data.history(period="1d")["Close"].iloc[-1]
+print("Current stock price:", current_price)
+
+# List available option expiration dates
+expirations = data.options
+print("Expiration dates:", expirations)
+
+# Choose an expiration date (for example, the first available one)
+expiration_date = expirations[0]
+
+# Retrieve the options chain for the selected expiration date
+option_chain = data.option_chain(expiration_date)
+
+# Extract calls and puts data (both are returned as pandas DataFrames)
+calls = option_chain.calls
+puts = option_chain.puts
+
+# Display the first few rows of the calls data for inspection
+print("Calls Data:")
+print(calls.head())
+
+
+# output meanings
+# strike = strike price of the option ( price at which you can buy/sell the underlying asset)
+# lastprice = price at which the option was last traded
+# bid/ask = the current highest price a buyer is willing to pay (bid) and the lowest price a seller is willing to accept (ask).
+# change/percent change = the absolute and percentage change in the option’s price from the previous trading day.
+# volume = the number of contracts traded during the current session
+# opneInterest = the total number of outstanding (open) contracts that have not been exercised or closed.
+# ImpliedVolatility = the market's forecast of the underlying asset's volatility
+# inTheMoney = a boolean indicating if the option is profitable to exercise immediately (for calls, if the current stock price is above the strike)
+# contractSize = the standard number of shares per option contract (typically 100)
+
+#############################################################################################################################
+
+# Cell 3: Downloading Options Data for Microsoft (MSFT)
+import yfinance as yf
+
+ticker_msft = "MSFT"
+data_msft = yf.Ticker(ticker_msft)
+
+# Get current stock price for MSFT
+current_price_msft = data_msft.history(period="1d")["Close"].iloc[-1]
+print("MSFT Current Stock Price:", current_price_msft)
+
+# List available option expiration dates for MSFT
+expirations_msft = data_msft.options
+print("MSFT Expiration dates:", expirations_msft)
+
+# Choose an expiration date (e.g., the first one)
+expiration_date_msft = expirations_msft[0]
+option_chain_msft = data_msft.option_chain(expiration_date_msft)
+
+# Extract calls and puts data
+calls_msft = option_chain_msft.calls
+puts_msft = option_chain_msft.puts
+
+# Display the first few rows of the calls data for MSFT
+print("MSFT Calls Data:")
+print(calls_msft.head())
+
+#############################################################################################################################
+
+# Cell 4: Downloading Options Data for Samsung Electronics (ticker: 005930.KS)
+import yfinance as yf
+
+ticker_samsung = "005930.KS"
+data_samsung = yf.Ticker(ticker_samsung)
+
+# Get current stock price for Samsung
+current_price_samsung = data_samsung.history(period="1d")["Close"].iloc[-1]
+print("Samsung Electronics Current Stock Price:", current_price_samsung)
+
+# List available option expiration dates for Samsung
+expirations_samsung = data_samsung.options
+print("Samsung Expiration dates:", expirations_samsung)
+
+# Choose an expiration date (e.g., the first one)
+expiration_date_samsung = expirations_samsung[0]
+option_chain_samsung = data_samsung.option_chain(expiration_date_samsung)
+
+# Extract calls and puts data
+calls_samsung = option_chain_samsung.calls
+puts_samsung = option_chain_samsung.puts
+
+# Display the first few rows of the calls data for Samsung
+print("Samsung Calls Data:")
+print(calls_samsung.head())
+
+# note: returns error message 'tuple index out of range' 
+# i am assuming not enough data in the samsung ticker
+# will look into this later
+
+####################################################################################################################################
+
+# Cell 5: Downloading Options Data for Alphabet Inc. (GOOGL)
+import yfinance as yf
+
+ticker_googl = "GOOGL"
+data_googl = yf.Ticker(ticker_googl)
+
+# Get current stock price for GOOGL
+current_price_googl = data_googl.history(period="1d")["Close"].iloc[-1]
+print("GOOGL Current Stock Price:", current_price_googl)
+
+# List available option expiration dates for GOOGL
+expirations_googl = data_googl.options
+print("GOOGL Expiration dates:", expirations_googl)
+
+# Choose an expiration date (e.g., the first one)
+expiration_date_googl = expirations_googl[0]
+option_chain_googl = data_googl.option_chain(expiration_date_googl)
+
+# Extract calls and puts data
+calls_googl = option_chain_googl.calls
+puts_googl = option_chain_googl.puts
+
+# Display the first few rows of the calls data for GOOGL
+print("GOOGL Calls Data:")
+print(calls_googl.head())
+
+#############################################################################################################################
+
+# Cell 6: Calculate Implied Volatilities and Plot the Implied Volatility Smile
+
+# what is volatility?
+# volatility is a statistical measure of the dispersion of returns for a given asset, usually expressed as an annualized standard deviation
+# in options pricing, volatility is crucial because it reflects the market's expectation of how much the asset's price might fluctuate over time
+
+# what is a volatility smile?
+# a volatility smile is a pattern that emerges when plotting implied volatility against various strike prices
+# in an ideal Black–Scholes world, volatility is assumed to be constant; however, in reality, implied volatilities for options that are deep 
+# in-the-money or deep out-of-the-money tend to be higher than those at-the-money
+# this pattern creates a smile (or sometimes a skewed curve) when graphed
+
+# 
+
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime
+
+# Compute time to maturity (in years) based on the chosen expiration date
+expiration = datetime.strptime(expiration_date, '%Y-%m-%d')
+today = datetime.today()
+T_years = (expiration - today).days / 365.0
+
+# Define the risk-free interest rate (assumed value, e.g., 1% here)
+r = 0.01
+
+# Initialize a list to store the calculated implied volatilities
+implied_vols = []
+
+# Retrieve strike prices from the calls DataFrame
+strikes = calls['strike'].values
+
+# Calculate the mid-market price of the option as the average of bid and ask prices
+market_prices = (calls['bid'] + calls['ask']) / 2.0
+
+# Loop over each option and compute its implied volatility
+for market_price, strike in zip(market_prices, strikes):
+    iv = implied_volatility_call(market_price, current_price, strike, T_years, r)
+    implied_vols.append(iv)
+
+# Create a DataFrame to hold strike prices and their corresponding implied volatilities
+df = pd.DataFrame({'Strike': strikes, 'Implied Volatility': implied_vols})
+df = df.dropna()  # Remove any rows with missing values
+
+# Plot the implied volatility smile
+plt.figure(figsize=(8, 5))
+plt.plot(df['Strike'], df['Implied Volatility'], marker='o', linestyle='-')
+plt.title('Implied Volatility Smile')
+plt.xlabel('Strike Price')
+plt.ylabel('Implied Volatility')
+plt.grid(True)
+plt.show()
+
+# graphical output
+# may indicate that the market is pricing extreme strikes (deep in/out-of-the-money) with higher volatilities, or it could be an artifact of the
+# interpolation of market data
+
+###################################################################################################################################
+
+# Cell 7: Monte Carlo Simulation for European Options (Call)
+
+# a simple Monte Carlo simulation for pricing a European call option using the standard geometric Brownian motion model
+
+import numpy as np
+
+def monte_carlo_european_call(S, K, T, r, sigma, n_sim=10000):
+    """
+    Price a European call option using Monte Carlo simulation.
+    
+    Parameters:
+        S (float): Current stock price.
+        K (float): Strike price.
+        T (float): Time to maturity (years).
+        r (float): Risk-free interest rate.
+        sigma (float): Volatility.
+        n_sim (int): Number of simulation paths.
+    
+    Returns:
+        float: Estimated call option price.
+    """
+    Z = np.random.standard_normal(n_sim)
+    S_T = S * np.exp((r - 0.5*sigma**2)*T + sigma*np.sqrt(T)*Z)
+    payoffs = np.maximum(S_T - K, 0)
+    price = np.exp(-r*T) * np.mean(payoffs)
+    return price
+
+# Example usage:
+S = 100
+K = 100
+T = 1
+r = 0.05
+sigma = 0.2
+
+price_euro = monte_carlo_european_call(S, K, T, r, sigma, n_sim=10000)
+print("Monte Carlo European Call Price:", price_euro)
+
+# very similar call price to the BS method - nice
+
+###############################################################################################################################
+
+# Cell 8: Monte Carlo Simulation for European Call Option using the Heston Model
+
+def monte_carlo_heston_call(S, K, T, r, kappa, theta, sigma_v, v0, rho, n_sim=10000, n_steps=100):
+    """
+    Price a European call option using Monte Carlo simulation under the Heston stochastic volatility model.
+    
+    Parameters:
+        S (float): Current stock price.
+        K (float): Strike price.
+        T (float): Time to maturity.
+        r (float): Risk-free rate.
+        kappa (float): Rate of mean reversion for variance.
+        theta (float): Long-run variance.
+        sigma_v (float): Volatility of the variance process.
+        v0 (float): Initial variance.
+        rho (float): Correlation between asset and variance.
+        n_sim (int): Number of simulation paths.
+        n_steps (int): Number of time steps.
+    
+    Returns:
+        float: Estimated call option price.
+    """
+    dt = T / n_steps
+    S_paths = np.zeros((n_sim, n_steps+1))
+    v_paths = np.zeros((n_sim, n_steps+1))
+    S_paths[:, 0] = S
+    v_paths[:, 0] = v0
+    
+    for i in range(1, n_steps+1):
+        Z1 = np.random.standard_normal(n_sim)
+        Z2 = np.random.standard_normal(n_sim)
+        # Impose correlation
+        Z2 = rho * Z1 + np.sqrt(1 - rho**2) * Z2
+        # Variance process (ensure non-negativity)
+        v_paths[:, i] = np.maximum(v_paths[:, i-1] + kappa*(theta - v_paths[:, i-1])*dt + sigma_v*np.sqrt(v_paths[:, i-1]*dt)*Z2, 0)
+        S_paths[:, i] = S_paths[:, i-1] * np.exp((r - 0.5*v_paths[:, i-1])*dt + np.sqrt(v_paths[:, i-1]*dt)*Z1)
+    
+    S_T = S_paths[:, -1]
+    payoffs = np.maximum(S_T - K, 0)
+    price = np.exp(-r*T) * np.mean(payoffs)
+    return price
+
+# Example usage for Heston model:
+S = 100; K = 100; T = 1; r = 0.05
+kappa = 2.0; theta = 0.04; sigma_v = 0.3; v0 = 0.04; rho = -0.5
+price_heston = monte_carlo_heston_call(S, K, T, r, kappa, theta, sigma_v, v0, rho, n_sim=10000, n_steps=100)
+print("Heston Model European Call Price:", price_heston)
+
+# again very similar call price - good
+
+##############################################################################################################################
+
+# Cell 9: Monte Carlo Simulation for European Call Option using Jump-Diffusion
+
+def monte_carlo_jump_diffusion_call(S, K, T, r, sigma, lamb, muJ, sigmaJ, n_sim=10000):
+    """
+    Price a European call option using Monte Carlo simulation under the Merton jump-diffusion model.
+    
+    Parameters:
+        S (float): Current stock price.
+        K (float): Strike price.
+        T (float): Time to maturity.
+        r (float): Risk-free rate.
+        sigma (float): Diffusion volatility.
+        lamb (float): Jump intensity (expected number of jumps per year).
+        muJ (float): Average jump size (in log terms).
+        sigmaJ (float): Volatility of jump sizes.
+        n_sim (int): Number of simulation paths.
+    
+    Returns:
+        float: Estimated call option price.
+    """
+    # Adjust drift for jump risk
+    drift_adj = r - lamb * (np.exp(muJ + 0.5*sigmaJ**2) - 1)
+    Z = np.random.standard_normal(n_sim)
+    # Number of jumps in each simulation path from a Poisson distribution
+    n_jumps = np.random.poisson(lamb * T, n_sim)
+    # Jump multiplier: assuming jumps are lognormally distributed
+    jump_multiplier = np.exp(n_jumps * (muJ - 0.5*sigmaJ**2) + sigmaJ*np.sqrt(T)*np.random.standard_normal(n_sim))
+    S_T = S * jump_multiplier * np.exp((drift_adj - 0.5*sigma**2)*T + sigma*np.sqrt(T)*Z)
+    payoffs = np.maximum(S_T - K, 0)
+    price = np.exp(-r*T) * np.mean(payoffs)
+    return price
+
+# Example usage for Jump Diffusion:
+S = 100; K = 100; T = 1; r = 0.05; sigma = 0.2
+lamb = 0.75; muJ = -0.1; sigmaJ = 0.3
+price_jump = monte_carlo_jump_diffusion_call(S, K, T, r, sigma, lamb, muJ, sigmaJ, n_sim=10000)
+print("Jump Diffusion European Call Price:", price_jump)
+
+# wow this is 1.5x the other prices
+# the jump-diffusion model adds jump risk into the asset dynamics, which typically increases option prices (especially out-of-the-money calls) 
+# to compensate for the extra risk
+# a higher call price in the jump-diffusion model indicates that the market might demand a premium for the possibility of large jumps
+# it doesn’t necessarily mean the model is “not a good fit”—rather, it’s capturing additional risk factors that the standard BS model ignores
+
+############################################################################################################################
+
+# Cell 10: Monte Carlo Simulation for European Call Option using a Local Volatility Model
+
+def monte_carlo_local_vol_call(S, K, T, r, sigma, alpha, n_sim=10000, n_steps=100):
+    """
+    Price a European call option using Monte Carlo simulation with a local volatility model.
+    
+    Parameters:
+        S (float): Current stock price.
+        K (float): Strike price.
+        T (float): Time to maturity.
+        r (float): Risk-free rate.
+        sigma (float): Base volatility.
+        alpha (float): Exponent parameter defining local volatility adjustment.
+        n_sim (int): Number of simulation paths.
+        n_steps (int): Number of time steps.
+    
+    Returns:
+        float: Estimated call option price.
+    """
+    dt = T / n_steps
+    S_paths = np.zeros((n_sim, n_steps+1))
+    S_paths[:, 0] = S
+    for i in range(1, n_steps+1):
+        # Local volatility function
+        sigma_local = sigma * (S_paths[:, i-1] / S)**alpha
+        Z = np.random.standard_normal(n_sim)
+        S_paths[:, i] = S_paths[:, i-1] * np.exp((r - 0.5*sigma_local**2)*dt + sigma_local*np.sqrt(dt)*Z)
+    S_T = S_paths[:, -1]
+    payoffs = np.maximum(S_T - K, 0)
+    price = np.exp(-r*T) * np.mean(payoffs)
+    return price
+
+# Example usage for Local Volatility:
+S = 100; K = 100; T = 1; r = 0.05; sigma = 0.2; alpha = 0.1
+price_local = monte_carlo_local_vol_call(S, K, T, r, sigma, alpha, n_sim=10000, n_steps=100)
+print("Local Volatility Model European Call Price:", price_local)
+
+# similar call price - good
