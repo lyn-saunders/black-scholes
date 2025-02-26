@@ -1,0 +1,300 @@
+# similarly to European_Jupyter_code, this code is to be run in jupyter notebook in the cell blocks indicated in the comments preluding the code
+
+# American vs European Options
+
+## American options allow early exercise. Unlike European options, there’s no closed-form solution for American options (especially puts)
+
+# Why use finite difference methods (FDMs)?
+
+## FDMs allows us to numerically solve the Black-Scholes PDE whilst handling the early exercise feature
+## We can enforce the early exercise condition at each time step by comparing the option’s computed value with its intrinsic value 
+## (e.g., for a put, the intrinsic value is max(K−S,0)
+## By relaxing some of the assumptions (e.g., constant volatility) or extending the domain (e.g., allowing for dividends, 
+## variable volatility, etc.), FDMs can yield more realistic pricing
+
+##########################################################################################################################
+
+# Cell 1: American Option Pricing via Finite Difference Methods (FTCS in particular)
+
+# we build a grid of stock prices and time, sets the terminal payoff V(S,T) = max(K-S,0), then iterates backwards in time
+# at each step, we update the option value using a simple implicit scheme and enforce the American option constraint by taking the maximum of the 
+# computed value and the intrinsic value K-S
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+def american_put_fd(K, T, r, sigma, S_max, M, N):
+    """
+    Price an American put option using an implicit finite difference method.
+    
+    Parameters:
+        K (float): Strike price.
+        T (float): Time to maturity (years).
+        r (float): Risk-free interest rate.
+        sigma (float): Volatility.
+        S_max (float): Maximum stock price considered (grid boundary).
+        M (int): Number of stock price steps.
+        N (int): Number of time steps.
+    
+    Returns:
+        S (np.array): Array of stock prices.
+        V (np.array): Option prices at time 0 corresponding to S.
+    """
+    # Set up the grid for stock prices and time
+    dS = S_max / M
+    dt = T / N
+    S = np.linspace(0, S_max, M+1)
+    
+    # Terminal condition at maturity: option payoff
+    V = np.maximum(K - S, 0)
+    
+    # Backward iteration in time
+    # Loop over each time step (backwards)
+    for j in range(N):
+        
+        # Create a copy to hold updated values
+        V_new = np.copy(V)
+        
+        # Solve for interior points: i = 1, 2, ..., M-1
+        for i in range(1, M):
+            
+            # Second derivative term (central difference)
+            d2V = (V[i+1] - 2 * V[i] + V[i-1]) / dS**2
+            
+            # First derivative term (central difference)
+            dV = (V[i+1] - V[i-1]) / (2 * dS)
+            
+            # Discretized PDE (implicit scheme): rearrange the PDE to get V_new[i]
+            # Here we use an approximation: (V_new - V)/dt + 0.5*sigma^2*S[i]^2*d2V + r*S[i]*dV - r*V[i] = 0
+            
+            # Solve for V_new[i]:
+            V_new[i] = V[i] - dt * (0.5 * sigma**2 * S[i]**2 * d2V + r * S[i] * dV - r * V[i])
+            
+            # Enforce the early exercise (American) constraint:
+            V_new[i] = max(V_new[i], K - S[i])
+            
+        # Update V for the next time step
+        V = V_new
+        
+    return S, V
+
+# Example usage:
+K = 100        # Strike price
+T = 1          # 1 year to maturity
+r = 0.05       # Risk-free interest rate (5%)
+sigma = 0.2    # Volatility (20%)
+S_max = 3 * K  # Maximum stock price on grid (e.g., 3 times the strike)
+M = 200        # Number of stock price steps
+N = 200        # Number of time steps
+
+S, V = american_put_fd(K, T, r, sigma, S_max, M, N)
+
+# Plot the American put option price as a function of stock price
+plt.plot(S, V, label="American Put Price (FDM)")
+plt.xlabel("Stock Price")
+plt.ylabel("Option Price")
+plt.title("American Put Option Price via Finite Difference Method")
+plt.legend()
+plt.show()
+
+# the plot shows an approximately normally distributed option price with the mean (stock price) being roughly 220
+
+#############################################################################################################################
+
+# Cell 2: American Put Pricing via Crank–Nicolson with PSOR
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+def american_put_cn_psor(K, T, r, sigma, S_max, M, N, omega=1.2, tol=1e-6, max_iter=5000):
+    """
+    Price an American put option using the Crank-Nicolson method with PSOR to enforce
+    the early exercise constraint.
+    
+    Parameters:
+        K (float): Strike price.
+        T (float): Time to maturity (years).
+        r (float): Risk-free interest rate.
+        sigma (float): Volatility.
+        S_max (float): Maximum stock price on the grid.
+        M (int): Number of spatial steps.
+        N (int): Number of time steps.
+        omega (float): Relaxation parameter for PSOR.
+        tol (float): Tolerance for PSOR convergence.
+        max_iter (int): Maximum iterations for PSOR at each time step.
+    
+    Returns:
+        S (np.array): Stock price grid.
+        V (np.array): Option values at time 0 along the grid.
+    """
+    dS = S_max / M
+    dt = T / N
+    S = np.linspace(0, S_max, M+1)
+    
+    # Set terminal condition at maturity: payoff = max(K - S, 0)
+    V = np.maximum(K - S, 0)
+    
+    # Set up the coefficients for the tridiagonal system.
+    # We work on interior nodes: i=1,...,M-1.
+    alpha = np.zeros(M-1)
+    beta  = np.zeros(M-1)
+    gamma = np.zeros(M-1)
+    
+    for i in range(1, M):
+        i_idx = i - 1  # index for interior arrays
+        alpha[i_idx] = 0.25 * dt * (sigma**2 * (i)**2 - r * i)
+        beta[i_idx]  = -0.5 * dt * (sigma**2 * (i)**2 + r)
+        gamma[i_idx] = 0.25 * dt * (sigma**2 * (i)**2 + r * i)
+    
+    # Construct the tridiagonal matrices A and B for the Crank-Nicolson scheme.
+    A = np.zeros((M-1, M-1))
+    B_mat = np.zeros((M-1, M-1))
+    for i in range(M-1):
+        if i > 0:
+            A[i, i-1] = -alpha[i]
+            B_mat[i, i-1] = alpha[i]
+        A[i, i] = 1 - beta[i]
+        B_mat[i, i] = 1 + beta[i]
+        if i < M-2:
+            A[i, i+1] = -gamma[i]
+            B_mat[i, i+1] = gamma[i]
+    
+    # Backward time-stepping using PSOR for each time step.
+    V_old = V.copy()
+    for n in range(N):
+        
+        # Right-hand side vector at time step n+1
+        rhs = B_mat.dot(V_old[1:M])
+        
+        # Adjust for boundary conditions: 
+        # At S=0, American put value = K (since payoff = K - 0).
+        # At S=S_max, value = 0.
+        
+        rhs[0]   -= -alpha[0] * K   # left boundary (i=1)
+        rhs[-1]  -= -gamma[-1] * 0   # right boundary (i=M-1)
+        
+        # PSOR iterations to solve A * x = rhs, for x = V_new at interior nodes.
+        x = V_old[1:M].copy()
+        error = 1.0
+        iter_count = 0
+        while error > tol and iter_count < max_iter:
+            error = 0.0
+            for i in range(M-1):
+                sigma_sum = 0.0
+                if i > 0:
+                    sigma_sum += A[i, i-1] * x[i-1]
+                if i < M-2:
+                    sigma_sum += A[i, i+1] * x[i+1]
+                x_new = (rhs[i] - sigma_sum) / A[i, i]
+                
+                # Over-relaxation and enforce early exercise: 
+                # For a put, value must be at least K - S[i+1]
+                x_old = x[i]
+                x[i] = max(x_old + omega*(x_new - x_old), K - S[i+1])
+                error = max(error, abs(x[i] - x_old))
+            iter_count += 1
+        
+        # Update the solution: interior nodes get new values.
+        V_old[1:M] = x
+        
+        # Boundary conditions:
+        V_old[0] = K        # at S=0, put = K
+        V_old[M] = 0        # at S=S_max, put = 0
+        
+    return S, V_old
+
+# Example usage:
+K = 100       # Strike price
+T = 1.0       # 1 year to maturity
+r = 0.05      # Risk-free rate of 5%
+sigma = 0.2   # Volatility of 20%
+S_max = 4 * K # Grid maximum stock price
+M = 200       # Number of spatial steps
+N = 200       # Number of time steps
+omega = 1.2   # PSOR relaxation parameter
+tol = 1e-6    # Tolerance for PSOR convergence
+max_iter = 5000  # Maximum PSOR iterations per time step
+
+S_grid, V_grid = american_put_cn_psor(K, T, r, sigma, S_max, M, N, omega, tol, max_iter)
+S0 = 100
+price_at_S0 = np.interp(S0, S_grid, V_grid)
+print("American Put Price via Crank-Nicolson PSOR:", price_at_S0)
+
+# Plot the solution for visualization
+plt.figure(figsize=(10,6))
+plt.plot(S_grid, V_grid, label="American Put Price")
+plt.xlabel("Stock Price")
+plt.ylabel("Option Price")
+plt.title("American Put Option Price via Crank-Nicolson PSOR")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+
+# In this cell we loop over a range of strikes. For each strike we compute the American put option price using an implicit finite difference 
+# method (backward time, central space), then “invert” the Black–Scholes European put formula to obtain an implied volatility. 
+# needs more looking into
+
+###############################################################################################################################
+
+# Cell 3: Monte Carlo Simulation for American Options (Put) using Longstaff–Schwartz
+
+import numpy as np
+
+def monte_carlo_american_put(S, K, T, r, sigma, n_sim=10000, n_steps=50):
+    """
+    Price an American put option using the Longstaff–Schwartz method.
+    
+    Parameters:
+        S (float): Current stock price (ensure this is a scalar).
+        K (float): Strike price.
+        T (float): Time to maturity (years).
+        r (float): Risk-free rate.
+        sigma (float): Volatility.
+        n_sim (int): Number of simulation paths.
+        n_steps (int): Number of time steps.
+    
+    Returns:
+        float: Estimated American put option price.
+    """
+    dt = T / n_steps
+    # Ensure S is a scalar. It should not be an array.
+    S_paths = np.zeros((n_sim, n_steps+1))
+    S_paths[:, 0] = S  # S must be a scalar here.
+    
+    # Simulate asset price paths
+    for i in range(1, n_steps+1):
+        Z = np.random.standard_normal(n_sim)
+        S_paths[:, i] = S_paths[:, i-1] * np.exp((r - 0.5*sigma**2)*dt + sigma*np.sqrt(dt)*Z)
+    
+    # Calculate payoff matrix for an American put: max(K - S, 0)
+    payoffs = np.maximum(K - S_paths, 0)
+    # Initialize continuation values at maturity
+    V = payoffs[:, -1]
+    
+    # Backward induction for early exercise decision
+    for t in range(n_steps-1, 0, -1):
+        V = np.exp(-r*dt) * V  # Discount option value back one step
+        itm = payoffs[:, t] > 0  # Identify in-the-money paths
+        X = S_paths[itm, t]
+        Y = V[itm]
+        if len(X) > 0:
+            # Regress continuation values on a polynomial basis (1, S, S^2)
+            A = np.vstack([np.ones_like(X), X, X**2]).T
+            coeff, _, _, _ = np.linalg.lstsq(A, Y, rcond=None)
+            continuation_value = coeff[0] + coeff[1]*X + coeff[2]*X**2
+            # Exercise if immediate payoff is greater than continuation value
+            exercise = payoffs[itm, t] > continuation_value
+            V[itm] = np.where(exercise, payoffs[itm, t], V[itm])
+    price = np.exp(-r*dt) * np.mean(V)
+    return price
+
+# Example usage:
+S = 100  # Ensure S is defined as a scalar
+K = 100
+T = 1
+r = 0.05
+sigma = 0.2
+
+price_american = monte_carlo_american_put(S, K, T, r, sigma, n_sim=10000, n_steps=50)
+print("Monte Carlo American Put Price (Longstaff–Schwartz):", price_american)
